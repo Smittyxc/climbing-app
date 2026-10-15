@@ -1,0 +1,25 @@
+# Node / web
+node_modules/
+dist/
+*.local
+
+# .NET
+bin/
+obj/
+*.user
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store

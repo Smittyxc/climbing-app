@@ -1,0 +1,45 @@
+substitutions:
+  _REGION: us-east1
+  _REPO: climbing-app
+  _SERVICE: climbing-ml
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/ml:$SHORT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/ml:latest
+      - -f
+      - apps/ml/Dockerfile
+      - apps/ml
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/ml
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/ml:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --no-allow-unauthenticated
+      - --service-account=ml-sa@$PROJECT_ID.iam.gserviceaccount.com
+      - --port=8080
+      - --cpu=2
+      - --memory=4Gi
+      - --timeout=300
+      - --set-env-vars=INFERENCE_MODE=yolo
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/ml:$SHORT_SHA

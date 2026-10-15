@@ -1,0 +1,44 @@
+substitutions:
+  _REGION: us-east1
+  _REPO: climbing-app
+  _SERVICE: climbing-api
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:$SHORT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:latest
+      - -f
+      - apps/api/Dockerfile
+      - apps/api
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --service-account=api-sa@$PROJECT_ID.iam.gserviceaccount.com
+      - --add-cloudsql-instances=$PROJECT_ID:${_REGION}:climbing-db
+      - --port=8080
+      - --update-env-vars=GCP_PROJECT_ID=$PROJECT_ID,GCS_BUCKET_NAME=$PROJECT_ID-climbing-images,CLOUD_SQL_CONNECTION_NAME=$PROJECT_ID:${_REGION}:climbing-db,CLOUD_SQL_DB=climbing_db,CLOUD_SQL_USER=climbing_app,FIREBASE_PROJECT_ID=$PROJECT_ID
+      - --set-secrets=CLOUD_SQL_PASSWORD=climbing-db-password:latest
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:$SHORT_SHA
