@@ -8,39 +8,57 @@ Legend: `[ ]` todo, `[~]` needs verification, `[x]` done.
 
 ## 1. Manual steps (require GCP / a Firebase project)
 
-- [ ] Create the GCP project and attach class billing credits.
+- [x] Create the GCP project and attach class billing credits.
 - [ ] **Firebase Auth**: add Firebase to the GCP project, enable **Email/Password**.
       Grab the web app config (`apiKey`, `authDomain`, `projectId`, `appId`).
 - [ ] Generate the initial EF migration **before** deploying (see §2).
-- [ ] Run `./infra/provision.sh <PROJECT_ID> us-east1`.
-- [ ] Create Cloud Build triggers (path-filtered):
-      `apps/api/**` -> `infra/cloudbuild-api.yaml`, `apps/ml/**` -> `infra/cloudbuild-ml.yaml`.
+- [~] Provision project resources via Terraform (see `docs/terraform.md`) —
+      M0–M6 applied and verified 2026-11-11 (APIs, registry, bucket, Cloud SQL +
+      secret, SAs/IAM, both Cloud Run services + invoker grants). M7 (Cloud Build)
+      remains.
+- [ ] Create two Cloud Build triggers on the repo (path-filtered so web/doc commits
+      don't rebuild images). Include each service's own build config in its filter —
+      otherwise editing the yaml won't fire its own build:
+      - API: `includeGlobs` = `apps/api/**`, `infra/cloudbuild-api.yaml`
+        -> config `infra/cloudbuild-api.yaml`
+      - ML:  `includeGlobs` = `apps/ml/**`, `infra/cloudbuild-ml.yaml`
+        -> config `infra/cloudbuild-ml.yaml`
+      `apps/web/**` deploys via Vercel and needs no trigger. Note: path filters only
+      gate *whether* a build runs; Cloud Build still uploads the whole repo as the
+      build source, but the docker build contexts (`apps/api/`, `apps/ml/`) keep the
+      images properly separated. Path-filtered changes that bypass a filter
+      (e.g. editing only a yaml) can be deployed manually with
+      `gcloud builds submit --config infra/cloudbuild-<api|ml>.yaml`.
 - [ ] Deploy `apps/web` to Vercel with `VITE_FIREBASE_*` + `VITE_API_BASE_URL=<API URL>`.
 - [ ] Set the API `AllowedOrigins` to the Vercel origin (currently `*` from provisioning).
 - [ ] Confirm the API service account can sign URLs (`roles/iam.serviceAccountTokenCreator`
       — granted by `provision.sh`); if images 403, that's the cause.
 
-## 2. Verify once the .NET SDK is available
+## 2. Verify locally (.NET SDK installed; build is green)
 
-> The API could **not** be compiled in this environment (no .NET SDK). Type-correctness was
-> reviewed by hand only. Run these first.
+> `dotnet restore && dotnet build` now succeeds on **.NET 10** after: renaming the model
+> `Route` -> `ClimbRoute` (CS0104: ambiguous with `Microsoft.AspNetCore.Routing.Route`
+> from implicit web usings), fixing `app.Run()` return handling in Program.cs, and
+> reading email from the JWT `email` claim (`FirebaseToken` has no `Email` property;
+> use `Claims.TryGetValue`).
 
-- [~] `cd apps/api && dotnet restore && dotnet build` — expect a clean build on **.NET 10**.
+Local Postgres (server + psql client are both inside the image; removed on stop):
+```bash
+docker run -d --rm --name climbing-db -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
+```
+
+- [x] `cd apps/api && dotnet restore && dotnet build` — clean build, 0 warnings/errors.
 - [~] `dotnet ef migrations add InitialCreate` — generates `Migrations/` + model snapshot.
-      Inspect the generated `route_holds.type` column (text) and the `holds` columns.
-- [~] `dotnet ef database update` against a local Postgres; run the API and hit `/healthz`,
-      `/scalar`, `/openapi/v1.json`.
-- [~] Confirm the `RouteHoldConfiguration` enum `HasConversion` compiles under EF Core 10
-      (nullable enum <-> string). If the two-expression overload is ambiguous, switch to an
-      explicit `ValueConverter<HoldType?, string?>`.
-- [~] Confirm EF Core 10 + `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3 resolve together.
-- [~] Verify `Google.Cloud.Storage.V1` **4.16.0** works on net10 (5.0.0 exists — decide
-      whether to bump; see §5).
+      Inspect the generated `route_holds.type` column (text), the `holds` columns, and the
+      new `fk_boards_users_user_id` / `fk_routes_users_user_id` constraints (Restrict).
+- [~] `dotnet ef database update` against the Docker Postgres; run the API and hit
+      `/health`, `/scalar`, `/openapi/v1.json` (no auth required on those routes).
+- [~] `--migrate-only` mode: exits 0 with migrations applied, exits 1 when none exist
+      (the Cloud Build migrate job depends on this behavior).
+- [x] EF Core 10 + `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3 resolve (build green).
+- [x] `Google.Cloud.Storage.V1` **4.16.0** compiles on net10 (runtime behavior verified
+      post-deploy in §4; 5.0.0 evaluation stays in §5).
 - [~] Verify Scalar UI renders at `/scalar` and the OpenAPI doc lists snake_case schemas.
-- [~] Confirm `FirebaseAuthMiddleware` behaves with ADC locally
-      (`GOOGLE_APPLICATION_CREDENTIALS` set) and returns 401 without a token.
-- [~] End-to-end smoke test against a local ML service:
-      signup -> upload image -> holds persisted -> build route -> view route.
 
 ## 3. Verify once ML dependencies are installed
 
@@ -53,11 +71,14 @@ Legend: `[ ]` todo, `[~]` needs verification, `[x]` done.
 - [~] `INFERENCE_MODE=sahi ...` and confirm `sahi` slices correctly and `bbox.to_xywh()`
       normalization matches. (SAHI path is entirely unverified.)
 - [~] Sanity-check the large-box filter threshold (0.04) against real detections.
-- [ ] Consider `min-instances=1` on the ML service to avoid ~10-20s torch cold starts during
-      the demo (costs a small amount; see §5).
+- [ ] Keep `min-instances=0` for now; set **`min-instances=1` on the ML service just
+      before the class demo** to avoid ~10-20s torch cold starts (small cost; revert after).
 
 ## 4. Deployed-system verification
 
+- [ ] **Full authed E2E flow** (moved from §2): signup -> upload image -> holds persisted
+      -> build route -> view route — exercised against the deployed API with a real
+      Firebase user; this is the first run of the upload/detect path anywhere.
 - [ ] Upload a real wall photo end-to-end; ensure the signed image URL loads in the browser
       (bucket CORS + signing both working).
 - [ ] Cloud SQL connectivity over the unix socket (`/cloudsql/...`).
@@ -81,6 +102,33 @@ Legend: `[ ]` todo, `[~]` needs verification, `[x]` done.
       beyond the `[RequestSizeLimit(25_000_000)]` on board upload.
 - [ ] Structured logging / OpenTelemetry for Cloud Run.
 - [ ] Consider hosting the SPA on GCS+CDN instead of Vercel (keeps everything in one cloud).
+- [ ] Make route-hold saving atomic: add `PUT /api/routes/{id}/holds` that replaces holds in
+      one EF transaction; update `RouteBuilderPage` to use it instead of update + delete + add.
+- [x] Referential integrity for `user_id`: the auth middleware guarantees the `users` row
+      exists (calls `GetOrCreateAsync` on every authenticated request), and
+      `boards.user_id`/`routes.user_id` now FK to `users(id)` (`Restrict` delete).
+      Verify the FK DDL when generating `InitialCreate` (see §2).
+- [ ] Set explicit `--cpu`/`--memory` on the API Cloud Run deploy step (currently defaults).
+
+---
+
+## 6. Data migration & operations
+
+- [ ] **Supabase data migration** (only if you want existing data). Blockers:
+      - identity: Supabase UUIDs -> Firebase UIDs (create Firebase users, keep a mapping,
+        rewrite `user_id`).
+      - holds: absolute pixels -> normalized; requires each image's pixel dimensions.
+        Old `app_data.json` stores `[x, y, w, h]` absolute; convert to
+        `x_center = (x + w/2) / image_width`, etc.
+      - the old `users` table has no email; it comes from Firebase.
+      For a class project, **starting fresh** is the low-risk option.
+- [ ] **Migrations in CI:** the Cloud Build pipeline now runs migrations via a one-off
+      Cloud Run Job (`climbing-api-migrate`) before deploying (`infra/cloudbuild-api.yaml`).
+      Verify the Cloud Build SA can create/execute Run Jobs (`roles/run.admin` or
+      `run.jobs.*` + `iam.serviceAccountUser` on `api-service-account`).
+- [ ] Note: `provision.sh` rotates the DB password on each run — redeploy the API after
+      re-running it, or existing revisions fail DB auth.
+- [ ] Disable OpenAPI + Scalar (`/openapi/v1.json`, `/scalar`) in production, or protect them.
 
 ---
 

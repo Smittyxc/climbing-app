@@ -1,6 +1,6 @@
 namespace ClimbingApp.Api.Models;
 
-public class Route
+public class ClimbRoute
 {
     public Guid Id { get; set; }
     public Guid? BoardId { get; set; }

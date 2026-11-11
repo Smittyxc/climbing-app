@@ -34,7 +34,7 @@ steps:
       - --region=${_REGION}
       - --platform=managed
       - --no-allow-unauthenticated
-      - --service-account=ml-sa@$PROJECT_ID.iam.gserviceaccount.com
+      - --service-account=ml-service-account@$PROJECT_ID.iam.gserviceaccount.com
       - --port=8080
       - --cpu=2
       - --memory=4Gi

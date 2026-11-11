@@ -4,9 +4,9 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace ClimbingApp.Api.Data.Configurations;
 
-public class RouteConfiguration : IEntityTypeConfiguration<Route>
+public class RouteConfiguration : IEntityTypeConfiguration<ClimbRoute>
 {
-    public void Configure(EntityTypeBuilder<Route> e)
+    public void Configure(EntityTypeBuilder<ClimbRoute> e)
     {
         e.ToTable("routes");
         e.HasKey(x => x.Id);
@@ -17,6 +17,10 @@ public class RouteConfiguration : IEntityTypeConfiguration<Route>
         e.Property(x => x.Grade).HasColumnName("grade");
         e.Property(x => x.CreatedAt).HasColumnName("created_at").ValueGeneratedNever();
         e.HasIndex(x => x.UserId).HasDatabaseName("idx_routes_user_id");
+        e.HasOne<UserProfile>().WithMany()
+            .HasForeignKey(x => x.UserId)
+            .HasConstraintName("fk_routes_users_user_id")
+            .OnDelete(DeleteBehavior.Restrict);
         e.HasIndex(x => x.BoardId).HasDatabaseName("idx_routes_board_id");
         e.HasMany(x => x.RouteHolds)
             .WithOne(rh => rh.Route)

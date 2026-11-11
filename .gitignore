@@ -21,5 +21,14 @@ venv/
 .env.*
 !.env.example
 
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!terraform.tfvars.example
+crash.log
+
 # OS
 .DS_Store

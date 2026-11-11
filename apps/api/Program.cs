@@ -59,10 +59,16 @@ builder.Services
 
 builder.Services.AddOpenApi();
 
+// Migrate-only mode: runs pending EF migrations and exits (used by the Cloud Run Job
+// in the Cloud Build pipeline, and handy for local dev).
+var migrateOnly = args.Contains("--migrate-only", StringComparer.OrdinalIgnoreCase)
+    || string.Equals(builder.Configuration["MIGRATE_ONLY"], "true", StringComparison.OrdinalIgnoreCase);
+
 var app = builder.Build();
 
-// Opt-in migration on startup (handy for the first deploy and local dev).
-if (string.Equals(app.Configuration["RUN_MIGRATIONS"], "true", StringComparison.OrdinalIgnoreCase))
+// Opt-in migration on startup (handy for local dev; CI uses the migrate-only job).
+if (migrateOnly
+    || string.Equals(app.Configuration["RUN_MIGRATIONS"], "true", StringComparison.OrdinalIgnoreCase))
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -70,12 +76,24 @@ if (string.Equals(app.Configuration["RUN_MIGRATIONS"], "true", StringComparison.
     {
         db.Database.Migrate();
     }
+    else if (migrateOnly)
+    {
+        Console.Error.WriteLine(
+            "[migrate] No migrations were found. Generate one with: dotnet ef migrations add InitialCreate");
+        return 1;
+    }
     else
     {
         Console.WriteLine(
             "[startup] RUN_MIGRATIONS=true but no migrations were found. Generate one with: " +
             "dotnet ef migrations add InitialCreate");
     }
+}
+
+if (migrateOnly)
+{
+    Console.WriteLine("[migrate] Done.");
+    return 0;
 }
 
 app.UseCors();
@@ -98,6 +116,7 @@ app.UseMiddleware<FirebaseAuthMiddleware>();
 app.MapControllers();
 app.MapOpenApi();
 app.MapScalarApiReference();
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
 app.Run();
+return 0;

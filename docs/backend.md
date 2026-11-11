@@ -44,8 +44,9 @@ Auth/FirebaseAuthMiddleware.cs verifies Bearer ID tokens -> HttpContext.Items
 - **Docs/UI:** built-in OpenAPI (`AddOpenApi`/`MapOpenApi`) with the Scalar UI at `/scalar`
   (replaces Swashbuckle on .NET 9+).
 - **Migrations:** EF Core migrations are the schema source of truth (generate with
-  `dotnet ef migrations add`). The API applies them at startup only when
-  `RUN_MIGRATIONS=true`, and logs a hint if none exist.
+  `dotnet ef migrations add`). In CI the Cloud Build pipeline applies them via a one-off
+  Cloud Run Job (`climbing-api-migrate`, `--migrate-only` mode) before deploying; the
+  `RUN_MIGRATIONS=true` startup path remains for local dev only.
 
 ### Request lifecycle — `POST /api/boards` (upload + detect)
 1. Firebase middleware resolves `uid` from the ID token.
@@ -61,7 +62,9 @@ Auth/FirebaseAuthMiddleware.cs verifies Bearer ID tokens -> HttpContext.Items
 
 ### Authentication
 `FirebaseAuthMiddleware` reads `Authorization: Bearer <idToken>`, verifies it with
-`FirebaseAdmin`, and stores `uid`/`email` on `HttpContext.Items`. Controllers call
+`FirebaseAdmin`, and stores `uid`/`email` on `HttpContext.Items`. It also upserts the
+`users` profile row (replaces Supabase's `handle_new_user()` trigger), guaranteeing the
+row exists before any controller runs — which the `user_id` FKs require. Controllers call
 `HttpContext.GetUserId()`, which throws `UnauthorizedAccessException`; a middleware
 maps that to **401**. No `[Authorize]` attributes — the token is optional at the pipeline
 level and required wherever `GetUserId()` is called.
@@ -86,9 +89,9 @@ service account can reach the private ML service. Off-GCP (local dev) no token i
 
 | Table | Columns | Notes |
 |-------|---------|-------|
-| `boards` | `id uuid PK`, `name`, `image_url` (GCS object), `user_id` (Firebase UID), `image_width`, `image_height`, `created_at` | image dims enable normalized rendering |
+| `boards` | `id uuid PK`, `name`, `image_url` (GCS object), `user_id` (Firebase UID, FK→users), `image_width`, `image_height`, `created_at` | image dims enable normalized rendering |
 | `holds` | `id uuid PK`, `board_id FK`, `x_center`, `y_center`, `width`, `height` (all 0..1), `confidence`, `created_at` | **normalized** bounding boxes |
-| `routes` | `id uuid PK`, `board_id FK`, `user_id`, `name`, `grade`, `created_at` | |
+| `routes` | `id uuid PK`, `board_id FK`, `user_id` (FK→users), `name`, `grade`, `created_at` | |
 | `route_holds` | `route_id FK`, `hold_id FK`, `type` (text: `hand/foot/start/end/unassigned`), PK(`route_id`,`hold_id`) | join with per-route hold role |
 | `users` | `id` (Firebase UID, text PK), `email`, `first_name`, `last_name`, `default_board_id FK` | profile upserted by the API |
 
@@ -117,7 +120,10 @@ All require a Firebase ID token. `{id}` is a UUID.
 | POST | `/api/routes/{id}/holds` | `{ holds: [{ hold_id, type }] }` | `204` |
 | DELETE | `/api/routes/{id}/holds` | — | `204` |
 
-Non-API endpoints: `GET /healthz` (Cloud Run probe), `/openapi/v1.json` (OpenAPI doc),
+Non-API endpoints: `GET /health` (deployment smoke test), `/openapi/v1.json` (OpenAPI doc),
+`/scalar` (Scalar API UI). **Never name endpoints `/healthz`** (or other z-suffixed
+paths): Cloud Run's frontend reserves them and answers with its own 404 before the
+request reaches the container (see Cloud Run known issues, "Reserved URL paths").
 `/scalar` (Scalar API UI).
 
 ### Configuration (env vars)
@@ -143,7 +149,7 @@ the model stays warm across requests.
 
 ```
 app/detector.py   HoldDetector: INFERENCE_MODE switch + large-box filter
-app/main.py       FastAPI app: GET /healthz, POST /detect
+app/main.py       FastAPI app: GET /health, POST /detect
 ```
 
 ### Inference modes (`INFERENCE_MODE`)

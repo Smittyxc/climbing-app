@@ -1,13 +1,9 @@
+using ClimbingApp.Api.Services;
+using FirebaseAdmin;
 using FirebaseAdmin.Auth;
 
 namespace ClimbingApp.Api.Auth;
 
-/// <summary>
-/// Verifies the Firebase ID token on the Authorization header and stores the
-/// resolved identity on HttpContext.Items. Does not reject requests itself;
-/// controllers call <see cref="HttpContextExtensions.GetUserId"/> which throws
-/// <see cref="UnauthorizedAccessException"/> when no valid identity is present.
-/// </summary>
 public class FirebaseAuthMiddleware
 {
     public const string UserIdKey = "firebase_uid";
@@ -26,10 +22,16 @@ public class FirebaseAuthMiddleware
             try
             {
                 var decoded = await FirebaseAuth.DefaultInstance.VerifyIdTokenAsync(token);
+                var email = decoded.Claims.TryGetValue("email", out var emailClaim)
+                    ? emailClaim as string
+                    : null;
                 context.Items[UserIdKey] = decoded.Uid;
-                context.Items[EmailKey] = decoded.Email;
+                context.Items[EmailKey] = email;
+
+                var users = context.RequestServices.GetRequiredService<UserService>();
+                await users.GetOrCreateAsync(decoded.Uid, email, context.RequestAborted);
             }
-            catch (Exception)
+            catch (Exception ex) when (ex is FirebaseException or OperationCanceledException)
             {
                 // Invalid/expired token: leave identity unset so protected endpoints 401.
             }

@@ -20,8 +20,8 @@ BUCKET="${PROJECT_ID}-climbing-images"
 REPO="climbing-app"
 API_SERVICE="climbing-api"
 ML_SERVICE="climbing-ml"
-API_SA="api-sa@${PROJECT_ID}.iam.gserviceaccount.com"
-ML_SA="ml-sa@${PROJECT_ID}.iam.gserviceaccount.com"
+API_SA="api-service-account@${PROJECT_ID}.iam.gserviceaccount.com"
+ML_SA="ml-service-account@${PROJECT_ID}.iam.gserviceaccount.com"
 
 echo "==> Using project ${PROJECT_ID} (region ${REGION})"
 gcloud config set project "${PROJECT_ID}" >/dev/null
@@ -105,9 +105,9 @@ echo "==> Deploying API service"
 gcloud builds submit --config infra/cloudbuild-api.yaml \
   --substitutions="_REGION=${REGION},_REPO=${REPO},_SERVICE=${API_SERVICE}" .
 
-echo "==> Wiring ML URL into the API, enabling migrations + CORS"
+echo "==> Wiring ML URL into the API + CORS (migrations run via the Cloud Build pipeline)"
 gcloud run services update "${API_SERVICE}" --region="${REGION}" \
-  --update-env-vars="ML_SERVICE_URL=${ML_URL},RUN_MIGRATIONS=true,AllowedOrigins=*" >/dev/null
+  --update-env-vars="ML_SERVICE_URL=${ML_URL},AllowedOrigins=*" >/dev/null
 
 API_URL="$(gcloud run services describe "${API_SERVICE}" --region="${REGION}" --format='value(status.url)')"
 

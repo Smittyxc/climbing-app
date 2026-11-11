@@ -82,7 +82,7 @@ public class RouteService : IRouteService
             throw new UnauthorizedAccessException("That board does not belong to you.");
         }
 
-        var route = new Route
+        var route = new ClimbRoute
         {
             Id = Guid.NewGuid(),
             BoardId = request.BoardId,
@@ -157,7 +157,7 @@ public class RouteService : IRouteService
     private static string? TypeToString(HoldType? type)
         => type.HasValue ? type.Value.ToString().ToLowerInvariant() : null;
 
-    private static RouteDto ToDto(Route r) => new()
+    private static RouteDto ToDto(ClimbRoute r) => new()
     {
         Id = r.Id,
         BoardId = r.BoardId,

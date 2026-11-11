@@ -15,5 +15,11 @@ public class UserProfileConfiguration : IEntityTypeConfiguration<UserProfile>
         e.Property(x => x.FirstName).HasColumnName("first_name");
         e.Property(x => x.LastName).HasColumnName("last_name");
         e.Property(x => x.DefaultBoardId).HasColumnName("default_board_id");
+        // Null the default board when its board is deleted (matches the original schema).
+        e.HasOne<Board>()
+            .WithMany()
+            .HasForeignKey(x => x.DefaultBoardId)
+            .OnDelete(DeleteBehavior.SetNull)
+            .HasConstraintName("fk_users_boards_default_board_id");
     }
 }

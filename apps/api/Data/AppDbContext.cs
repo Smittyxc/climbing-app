@@ -9,7 +9,7 @@ public class AppDbContext : DbContext
 
     public DbSet<Board> Boards => Set<Board>();
     public DbSet<Hold> Holds => Set<Hold>();
-    public DbSet<Route> Routes => Set<Route>();
+    public DbSet<ClimbRoute> Routes => Set<ClimbRoute>();
     public DbSet<RouteHold> RouteHolds => Set<RouteHold>();
     public DbSet<UserProfile> Users => Set<UserProfile>();
 

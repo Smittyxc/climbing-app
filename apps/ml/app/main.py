@@ -5,7 +5,7 @@ from .detector import INFERENCE_MODE, detector
 app = FastAPI(title="Climbing Hold Detector", version="1.0.0")
 
 
-@app.get("/healthz")
+@app.get("/health")
 def health() -> dict:
     return {"status": "ok", "mode": INFERENCE_MODE}
 

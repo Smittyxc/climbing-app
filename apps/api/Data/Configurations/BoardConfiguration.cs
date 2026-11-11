@@ -18,6 +18,10 @@ public class BoardConfiguration : IEntityTypeConfiguration<Board>
         e.Property(x => x.ImageHeight).HasColumnName("image_height");
         e.Property(x => x.CreatedAt).HasColumnName("created_at").ValueGeneratedNever();
         e.HasIndex(x => x.UserId).HasDatabaseName("idx_boards_user_id");
+        e.HasOne<UserProfile>().WithMany()
+            .HasForeignKey(x => x.UserId)
+            .HasConstraintName("fk_boards_users_user_id")
+            .OnDelete(DeleteBehavior.Restrict);
         e.HasMany(x => x.Holds).WithOne(h => h.Board!).HasForeignKey(h => h.BoardId).OnDelete(DeleteBehavior.Cascade);
     }
 }
