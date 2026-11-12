@@ -39,7 +39,10 @@ steps:
       - --cpu=2
       - --memory=4Gi
       - --timeout=300
-      - --set-env-vars=INFERENCE_MODE=yolo
+      - --update-env-vars=INFERENCE_MODE=yolo
+
+options:
+  logging: CLOUD_LOGGING_ONLY
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/ml:$SHORT_SHA

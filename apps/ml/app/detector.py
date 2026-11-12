@@ -22,7 +22,6 @@ SAHI_CONF = float(os.getenv("SAHI_CONF", "0.45"))
 SAHI_OVERLAP = float(os.getenv("SAHI_OVERLAP", "0.2"))
 
 # Detections whose area exceeds this fraction of the image are discarded.
-# Ported from the original scripts' "large box" filter (image_area / 25).
 MAX_BOX_AREA_FRACTION = float(os.getenv("MAX_BOX_AREA_FRACTION", "0.04"))
 
 

@@ -228,21 +228,29 @@ resource "google_cloud_run_v2_service_iam_member" "public" {
   member   = "allUsers"
 }
 
+resource "google_service_account" "cloudbuild_trigger" {
+  account_id   = "cloudbuild-trigger"
+  display_name = "Cloud Build trigger SA"
+}
 
-resource "google_project_iam_member" "cloudbuild_deploy" {
+resource "google_project_iam_member" "cloudbuild_trigger" {
+  for_each = toset([
+    "roles/cloudbuild.builds.builder",
+    "roles/run.admin",
+  ])
   project = var.project_id
-  role    = "roles/run.admin"
-  member  = "serviceAccount:470057875092@cloudbuild.gserviceaccount.com"
+  role    = each.key
+  member  = "serviceAccount:${google_service_account.cloudbuild_trigger.email}"
 }
 
 resource "google_service_account_iam_member" "cloudbuild_actas_api" {
   service_account_id = google_service_account.api_sa.name
   role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:470057875092@cloudbuild.gserviceaccount.com"
+  member             = "serviceAccount:${google_service_account.cloudbuild_trigger.email}"
 }
 
 resource "google_service_account_iam_member" "cloudbuild_actas_ml" {
   service_account_id = google_service_account.ml_sa.name
   role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:470057875092@cloudbuild.gserviceaccount.com"
+  member             = "serviceAccount:${google_service_account.cloudbuild_trigger.email}"
 }
