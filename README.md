@@ -20,15 +20,6 @@ from a Supabase-backed SPA + local ML scripts to a serverless Google Cloud stack
 **GCP services:** Cloud Run (api + ml), Cloud SQL for PostgreSQL, Cloud Storage,
 Cloud Build, Artifact Registry. **Plus Firebase Auth** for identity.
 
-See [`PLAN.md`](./PLAN.md) for the full migration plan and design decisions.
-
-## Documentation
-
-- [`docs/backend.md`](./docs/backend.md) — API + ML architecture, data model, endpoints, env vars
-- [`docs/frontend.md`](./docs/frontend.md) — SPA structure, data layer, auth, pages, features
-- [`docs/TODO.md`](./docs/TODO.md) — remaining setup steps and what to verify with an SDK
-- [`docs/security.md`](./docs/security.md) — ingress/port lockdown, firewalls, IAM, and hardening checklist
-
 ## Repo layout
 
 ```
@@ -37,7 +28,7 @@ apps/
   api/   ASP.NET Core 10 REST API (EF Core, FirebaseAdmin, GCS)
   ml/    Python FastAPI detector (Ultralytics YOLO / SAHI)
 infra/
-  provision.sh         first-time GCP provisioning + deploy
+  terraform/           Terraform config (project resources, milestones in docs/terraform.md)
   cloudbuild-api.yaml
   cloudbuild-ml.yaml
 ```
@@ -53,56 +44,12 @@ infra/
    pixels at render time.
 4. Routes are `routes` + `route_holds` (hold `type`: `start | hand | foot | end | unassigned`).
 
-## Local development
-
-### Prerequisites
-- .NET SDK 10, Node 20+, Python 3.11+, [Docker](https://www.docker.com/) (optional)
-- A Firebase project with **Email/Password** auth enabled
-- `gcloud` CLI authenticated (for Cloud SQL / GCS access) — or run with local stand-ins
-
-### 1. ML service
-```bash
-cd apps/ml
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-INFERENCE_MODE=yolo uvicorn app.main:app --port 8081
-# SAHI:  INFERENCE_MODE=sahi uvicorn app.main:app --port 8081
-```
-`INFERENCE_MODE` selects the inference path: `yolo` (default, direct Ultralytics
-predict) or `sahi` (sliced inference). Both emit identical normalized output.
-
-### 2. API service
-```bash
-cd apps/api
-dotnet restore
-dotnet tool install --global dotnet-ef   # once
-dotnet ef migrations add InitialCreate   # generates Migrations/ + the model snapshot
-# Point CLOUD_SQL_* at a local Postgres (see appsettings.Development.json for defaults)
-RUN_MIGRATIONS=true dotnet run
-```
-Environment (see `appsettings.Development.json` for local defaults):
-`GCS_BUCKET_NAME`, `CLOUD_SQL_*` (or `DATABASE_CONNECTION_STRING`), `ML_SERVICE_URL`,
-`FIREBASE_PROJECT_ID`, `AllowedOrigins`, `RUN_MIGRATIONS`, `SIGNED_URL_TTL_MINUTES`.
-Set `GOOGLE_APPLICATION_CREDENTIALS` to a service-account key for GCS/Firebase locally.
-
-### 3. Web app
-```bash
-cd apps/web
-npm install
-cp .env.example .env   # fill in VITE_FIREBASE_* and VITE_API_BASE_URL
-npm run dev
-```
-
 ## Deploying to GCP
 
-```bash
-gcloud auth login
-./infra/provision.sh <PROJECT_ID> [REGION]   # REGION defaults to us-east1
-```
-
-This enables APIs, creates the bucket (+CORS), Cloud SQL instance, DB user + Secret
-Manager secret, Artifact Registry repo, and service accounts; builds and deploys both
-Cloud Run services; then wires the ML URL into the API.
+Infrastructure is provisioned with **Terraform** (`infra/terraform/` — milestone-by-
+milestone guide in `docs/terraform.md`), and pushes to `main` deploy automatically via
+Cloud Build triggers (`infra/cloudbuild-*.yaml`). First-time setup steps live in
+`docs/terraform.md` §0–§2.
 
 Notes:
 - **Firebase Auth** must be set up in the Firebase console (add Firebase to the GCP
@@ -130,52 +77,3 @@ Create Cloud Build triggers (path-filtered) pointing at:
 | api | `FIREBASE_PROJECT_ID`, `GCS_BUCKET_NAME`, `CLOUD_SQL_CONNECTION_NAME`/`DATABASE_CONNECTION_STRING`, `CLOUD_SQL_DB`, `CLOUD_SQL_USER`, `CLOUD_SQL_PASSWORD` (secret), `ML_SERVICE_URL`, `AllowedOrigins`, `RUN_MIGRATIONS`, `SIGNED_URL_TTL_MINUTES` |
 | ml  | `INFERENCE_MODE` (`yolo`/`sahi`), `YOLO_CONF`, `SAHI_CONF`, `IMGSZ`, `MAX_BOX_AREA_FRACTION`, `MODEL_PATH` |
 | web | `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`, `VITE_API_BASE_URL` |
-
-## Known gaps & caveats
-
-Things worth knowing before you deploy. (Actionable items are tracked in `docs/TODO.md`.)
-
-- **No data migration from Supabase.** Existing users, boards, routes, and holds are *not*
-  carried over. Two blockers: identity changes from Supabase UUIDs → Firebase UIDs, and
-  holds change from absolute pixels → **normalized** coordinates (which requires each
-  image's pixel dimensions). Either start fresh or write a one-off backfill. Importing old
-  `app_data.json` (`[x, y, w, h]` absolute) needs a conversion to normalized centers.
-- **Migrations run in CI, not at startup.** The Cloud Build pipeline deploys a one-off
-  Cloud Run Job (`climbing-api-migrate`) and waits for it before deploying the new API
-  revision. `RUN_MIGRATIONS` stays available for local dev.
-- **`provision.sh` rotates the DB password on every run** (new secret version + new DB user
-  password). A running API revision keeps the *old* password until it redeploys, so re-runs
-  can cause transient DB connection failures. Re-run it intentionally.
-- **`users.default_board_id` FK** is `ON DELETE SET NULL` (matches the original schema).
-  This is an *active-board preference*, not a one-board limit — users own many boards.
-- **OpenAPI + Scalar UI (`/openapi/v1.json`, `/scalar`) are publicly reachable** and
-  unauthenticated — minor info disclosure. Consider disabling them in production.
-- **CORS `*`** (set by provisioning) is safe with Bearer-token auth but would break if you
-  switch to cookie-based sessions. Tighten it to the Vercel origin (`docs/security.md` §8).
-- **Model weights are committed to git** (`apps/ml/best4.pt`, ~5 MB) and baked into the ML
-  image. Fine at this size; move to a weights store if it grows.
-- **`SAHI` inference mode is unverified** here (torch/sahi not installed). Validate before
-  demoing that mode.
-- **Untested:** no automated tests yet for any service (see `docs/TODO.md` §5). The API was
-  also not compiled in this environment (no .NET SDK).
-- **Frontend bundle** is >500 kB (Vite warning, mostly Konva/shadcn/recharts); not blocking.
-- **Uploads aren't content-type validated** beyond size — see `docs/security.md` §9.
-- **Saving a route is non-transactional.** `RouteBuilderPage` updates the route, deletes its
-  holds, then re-inserts them as **three separate HTTP calls**. If the last call fails, the
-  route is left with no holds. Prefer a single `PUT /api/routes/{id}/holds` that replaces
-  holds inside one EF transaction.
-- **Referential integrity on `user_id` is enforced.** `boards.user_id` / `routes.user_id`
-   FK to `users(id)` (EF `Restrict` delete). The auth middleware guarantees the `users`
-   row exists on every authenticated request, so inserts can't reference a missing profile.
-- **API Cloud Run resources are defaults** (no `--cpu`/`--memory` set in the API deploy
-  step), unlike the ML service (2 vCPU / 4 GiB). Bump if upload/inference proxying is heavy.
-
-## Differences from the original Supabase app
-
-- Auth: Supabase email/password → **Firebase Auth**; profile row created by the API
-  (replaces the `handle_new_user()` trigger). `users.id`/`*.user_id` are Firebase UIDs.
-- Storage: Supabase Storage → **GCS**, served via signed URLs.
-- DB: Supabase Postgres → **Cloud SQL**. RLS removed; ownership enforced in the API.
-- Holds: absolute pixels (`coord_a..d`) → **normalized** `x_center/y_center/width/height`
-  + `confidence`, with `boards.image_width/image_height`.
-- Hold uploads: manual JSON file upload → **automatic detection** on image upload.

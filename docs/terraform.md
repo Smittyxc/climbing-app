@@ -1,6 +1,7 @@
 # Terraform (Option A — infra as code, Cloud Build for deploys)
 
-`infra/terraform/` replaces `infra/provision.sh` as the owner of project resources.
+`infra/terraform/` owns the project resources (it replaced the original
+`infra/provision.sh`, now deleted).
 The Cloud Build yamls (`infra/cloudbuild-*.yaml`) stay: they are the *pipeline*
 (what runs on push), while Terraform owns the *infrastructure* (what exists).
 
@@ -51,12 +52,11 @@ infra/terraform/
 
 Each milestone is one `plan` + `apply` + verification.
 
-**Progress (2026-11-11): M0–M6 applied and verified.** M0–M3 via Terraform
-(APIs, registry, bucket + CORS, Cloud SQL + secret); M4 SAs/IAM (4 project roles on
-`api-service-account`, none on `ml-service-account`); M5 ML service (403 unauth / 200
-authed on `/health`); M6 API service (`/health` → 200, `/scalar` renders) + both
-invoker grants (`allUsers` on API, `api-service-account` on ML). The ~$10–15/mo
-Cloud SQL floor is live. M7 (Cloud Build) is next.
+**Progress (2026-11-12): M0–M7 applied and verified — infrastructure complete.**
+M0–M6 details below in the milestone table; M7: Cloud Build triggers (console-created)
+run green — build → push → migrate (`InitialCreate` applied to Cloud SQL) → deploy.
+**Full E2E flow (signup → upload → ML detection → route building) verified against
+production with a real Firebase user.** The ~$10–15/mo Cloud SQL floor is live.
 
 | # | Milestone | Resources | Verify |
 |---|-----------|-----------|--------|
@@ -67,7 +67,8 @@ Cloud SQL floor is live. M7 (Cloud Build) is next.
 | M4 ✅ | SAs + IAM | 2× `google_service_account`; 4× `google_project_iam_member` (`cloudsql.client`, `storage.objectAdmin`, `secretmanager.secretAccessor`, `iam.serviceAccountTokenCreator`) | `gcloud projects get-iam-policy` shows bindings |
 | M5 ✅ | ML service | `google_cloud_runv2_service` (2 vCPU/4Gi, port 8080, timeout 300, `INFERENCE_MODE=yolo`, `ml-service-account`, no public invocation) | unauthenticated `/health` → 403 (correct) |
 | M6 ✅ | API service | `google_cloud_runv2_service` (env vars, secret binding, Cloud SQL socket, `api-service-account`, `ASPNETCORE_FORWARDEDHEADERS_ENABLED`) + `google_cloud_run_v2_service_iam_member` (`api-service-account` → `run.invoker` on ML, `allUsers` → invoker on API) | `/health` → ok, `/scalar` renders |
-| M7 | Migrate job + triggers | migrate `google_cloud_runv2_job` + 2× `google_cloudbuild_trigger` (`include_globs` per TODO §1) | push touching `apps/api/**` → green build in History |
+| M7 ✅ | Cloud Build pipeline | `cloudbuild-trigger` SA (Terraform: `cloudbuild.builds.builder` + `run.admin` + actAs on both runtime SAs); GitHub connection + 2 path-filtered triggers created in **console** (Terraform-ifying them deferred); yamls use `CLOUD_LOGGING_ONLY` + job-level `--set-cloudsql-instances` | push touching `apps/api/**` → green build; migrations applied to Cloud SQL |
+| M8 ✅ | Firebase | console only (Auth Email/Password + web config) | login works from the deployed Vercel app |
 | M8 | Firebase | **not Terraform** — console only (Auth Email/Password + web config) | — |
 
 Notes per milestone:
@@ -87,10 +88,20 @@ Notes per milestone:
 - **M8:** Firebase Auth enablement is console-only for a Spark-plan project; not worth
   the Identity Platform resource fiddliness.
 
-## 3. Rules
+## 3. Service account map (the whole IAM story)
 
-1. **Never run `provision.sh` against this project.** One owner per resource; the
-   script's DB-password rotation would fight Terraform's `random_password` state.
+| SA | Job | Key grants |
+|----|-----|-----------|
+| `cloudbuild-trigger` | builds images, runs migrations, deploys | `cloudbuild.builds.builder`, `run.admin`, actAs on both runtime SAs |
+| `api-service-account` | runs the API | `cloudsql.client`, `storage.objectAdmin`, `secretAccessor`, `serviceAccountTokenCreator`, invoker on ML |
+| `ml-service-account` | runs the ML service | none |
+| default compute SA | unused | legacy `editor` (do not assign to services) |
+
+## 4. Rules
+
+1. **No second writer for provisioning.** `provision.sh` has been deleted (git history
+   retains it) — do not resurrect it or hand-run equivalent gcloud commands; the script's
+   DB-password rotation would fight Terraform's `random_password` state.
 2. **`terraform plan` before every `apply`** — read it. Watch for unintended
    replaces on the Cloud Run services (a forced replacement = downtime + migration
    re-run logic).

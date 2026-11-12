@@ -190,7 +190,7 @@ resource "google_cloud_run_v2_service" "api" {
       }
       env {
         name  = "AllowedOrigins"
-        value = "*"
+        value = "https://climbing-app-swart.vercel.app"
       }
       env {
         name  = "ML_SERVICE_URL"
